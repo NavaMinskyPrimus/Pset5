@@ -1,6 +1,5 @@
 #include "kernel.h" // DO NOT EDIT!!!
 #include "lib.h"    // DO NOT EDIT!!!
-
 // kernel.c
 //
 //    This is the kernel.
@@ -128,12 +127,29 @@ void kernel(const char *command)
     run(&processes[1]);
 }
 
-
-uint32_t find_free_page(){
-    // TODO
+int find_free_page()
+{
+    for (int i = 0; i < PAGENUMBER(MEMSIZE_PHYSICAL); i++)
+    {
+        if (pageinfo[i].refcount == 0)
+        {
+            return i;
+        }
+    }
     return -1;
 }
 
+x86_64_pagetable *find_free_page_for_table(int8_t owner)
+{
+    int i = find_free_page();
+    if (i == -1)
+    {
+        return NULL;
+    }
+    pageinfo[i].refcount = 1;
+    pageinfo[i].owner = owner;
+    return (x86_64_pagetable *)PAGEADDRESS(i);
+}
 
 // process_setup(pid, program_number)
 //    Load application program `program_number` as process number `pid`.
@@ -143,8 +159,66 @@ uint32_t find_free_page(){
 void process_setup(pid_t pid, int program_number)
 {
     process_init(&processes[pid], 0);
-    processes[pid].p_pagetable = kernel_pagetable;
-    ++pageinfo[PAGENUMBER(kernel_pagetable)].refcount; // increase refcount since kernel_pagetable was used
+
+    x86_64_pagetable *pt_L4 = find_free_page_for_table(pid);
+    if (!pt_L4)
+    {
+        panic("No more physical pages\n");
+    }
+    x86_64_pagetable *pt_L3 = find_free_page_for_table(pid);
+    if (!pt_L3)
+    {
+        panic("No more physical pages\n");
+    }
+    x86_64_pagetable *pt_L2 = find_free_page_for_table(pid);
+    if (!pt_L2)
+    {
+        panic("No more physical pages\n");
+    }
+    x86_64_pagetable *pt_L1_0 = find_free_page_for_table(pid);
+    if (!pt_L1_0)
+    {
+        panic("No more physical pages\n");
+    }
+    x86_64_pagetable *pt_L1_1 = find_free_page_for_table(pid);
+    if (!pt_L1_1)
+    {
+        panic("No more physical pages\n"); // Error: should I panic? or use smthn else?
+    }
+    // set the pages to zero
+    memset(pt_L4, 0, PAGESIZE);
+    memset(pt_L3, 0, PAGESIZE);
+    memset(pt_L2, 0, PAGESIZE);
+    memset(pt_L1_0, 0, PAGESIZE);
+    memset(pt_L1_1, 0, PAGESIZE);
+
+    // Link the page tables together. Did I do this right?
+    pt_L4->entry[0] = (x86_64_pageentry_t)pt_L3 | PTE_P | PTE_W | PTE_U;
+    pt_L3->entry[0] = (x86_64_pageentry_t)pt_L2 | PTE_P | PTE_W | PTE_U;
+    pt_L2->entry[0] = (x86_64_pageentry_t)pt_L1_0 | PTE_P | PTE_W | PTE_U;
+    pt_L2->entry[1] = (x86_64_pageentry_t)pt_L1_1 | PTE_P | PTE_W | PTE_U;
+
+    // Copy kernel mappings (for addresses below PROC_START_ADDR)
+    for (uintptr_t addr = 0; addr < PROC_START_ADDR; addr += PAGESIZE)
+    {                                                                   // we're gonna go page by page I think
+        vamapping vmap = virtual_memory_lookup(kernel_pagetable, addr); // get the pagetable page of addr in the kernel
+        if (vmap.pn >= 0)
+        {
+            // Copy the mapping, but ensure the console is user-accessible
+            int perm = vmap.perm;
+            if (addr == CONSOLE_ADDR)
+            {
+                perm |= PTE_U; // Make console user-accessible
+            }
+            else
+            {
+                perm &= ~PTE_U; // Make sure kernel memory is not user-accessible
+            }
+            virtual_memory_map(pt_L4, addr, vmap.pa, PAGESIZE, perm);
+        }
+    }
+
+    processes[pid].p_pagetable = pt_L4;
 
     int r = program_load(&processes[pid], program_number, NULL);
     assert(r >= 0);
@@ -213,7 +287,6 @@ void syscall_mem_tog(proc *process)
         process->display_status = !(process->display_status);
     }
 }
-
 // exception(reg)
 //    Exception handler (for interrupts, traps, and faults).
 //
@@ -301,18 +374,25 @@ void exception(x86_64_registers *reg)
         }
         // if the page already exists
         vamapping vam = virtual_memory_lookup(current->p_pagetable, addr);
-        if (vam.pn < 0)
+        if (vam.pn >= 0)
         {
             current->p_registers.reg_rax = -1;
             break;
         }
-
-        int r = assign_physical_page(addr, current->p_pid);
+        int i = find_free_page();
+        if (i == -1)
+        {
+            current->p_registers.reg_rax = -1;
+            break;
+        }
+        uintptr_t physaddr = PAGEADDRESS(i);
+        int r = assign_physical_page(physaddr, current->p_pid);
         if (r >= 0)
         {
-            virtual_memory_map(current->p_pagetable, addr, addr,
+            virtual_memory_map(current->p_pagetable, addr, physaddr,
                                PAGESIZE, PTE_P | PTE_W | PTE_U);
         }
+
         current->p_registers.reg_rax = r;
         break;
     }
