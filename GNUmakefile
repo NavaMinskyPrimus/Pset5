@@ -174,7 +174,7 @@ run-gdb-graphic-%: %.img check-qemu
 run-gdb-console-%: %.img check-qemu
 	@lockfile -r 0 ./$(HOST_LOCK) || (echo ${errbef} && cat $(HOST_FILE); echo ${erraft}; exit 1)
 	@hostname > $(HOST_FILE) 
-	$(call run,$(QEMU_PRELOAD) $(QEMU) $(QEMUOPT) -display curses -gdb tcp::1234 $(QEMUIMG),QEMU $<)
+	$(call run,$(QEMU_PRELOAD) $(QEMU) $(QEMUOPT) -display curses -gdb tcp::1234 $(QEMUIMG),QEMU $<) -S
 	@rm -f ./$(HOST_FILE)
 	@rm -f ./$(HOST_LOCK)
 

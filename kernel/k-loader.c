@@ -100,6 +100,19 @@ static int program_load_segment(proc *p, const elf_program *ph,
             console_printf(CPOS(22, 0), 0xC000,
                            "program_load_segment(pid %d): out of physical memory\n",
                            p->p_pid);
+            for (uintptr_t undo = va; undo < addr; addr += PAGESIZE) // we go through and free all the pages if one of the pages fials.
+            {
+                vamapping vmap = virtual_memory_lookup(p->p_pagetable, addr);
+                if (vmap.pn < 0)
+                {
+                    panic("nope\n");
+                    return -1;
+                }
+                else
+                {
+                    freepage(vmap.pn);
+                }
+            }
             return -1;
         }
         uintptr_t pa = PAGEADDRESS(pn);
@@ -107,6 +120,19 @@ static int program_load_segment(proc *p, const elf_program *ph,
                                                                          PTE_P | PTE_U | PTE_W) < 0)
         {
             console_printf(CPOS(22, 0), 0xC000, "program_load_segment(pid %d): can't assign address %p\n", p->p_pid, addr);
+            for (uintptr_t undo = va; undo < addr; addr += PAGESIZE) // we go through and free all the pages if one of the pages fials.
+            {
+                vamapping vmap = virtual_memory_lookup(p->p_pagetable, addr);
+                if (vmap.pn < 0)
+                {
+                    panic("nope\n");
+                    return -1;
+                }
+                else
+                {
+                    freepage(vmap.pn);
+                }
+            }
             return -1;
         }
     }

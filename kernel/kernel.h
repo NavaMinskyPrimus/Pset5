@@ -193,5 +193,5 @@ int error_vprintf(int cpos, int color, const char *format, va_list val)
 void default_exception(proc *p);
 
 int find_free_page();
-
+void freepage(int pn);
 #endif
